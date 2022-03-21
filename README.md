@@ -38,7 +38,7 @@ For the complete list of changes made to schemachange check out the [CHANGELOG](
    1. [Prerequisites](#prerequisites)
    1. [Running The Script](#running-the-script)
 1. [Getting Started with schemachange](#getting-started-with-schemachange)
-1. [Secure Data Sharing: Deploying to Reader accounts](#secure-data-sharing:-deploying-to-reader-accounts)
+1. [Secure Data Sharing and Deploying to Reader Accounts](#secure-data-sharing-and-deploying-to-reader-accounts)
 1. [Integrating With DevOps](#integrating-with-devops)
    1. [Sample DevOps Process Flow](#sample-devops-process-flow)
    1. [Using in a CI/CD Pipeline](#using-in-a-cicd-pipeline)
