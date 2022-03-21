@@ -398,6 +398,12 @@ Deploying resources to read-only accounts is necessary when using with Secure Da
 
 In order to deploy resources to reader account(s), schemachange must manage the migration history in the provider account. This is an additional functionality and requires setting external account parameters during deployment. This functionality can be enabled by setting `--deploy-external` switch. Migration history tables are named similarly but with account locator as suffix.
 
+It can be executed as follows:
+
+```
+python schemachange/cli.py [-h] [--config-folder CONFIG_FOLDER] [-f ROOT_FOLDER] [-a SNOWFLAKE_ACCOUNT] [-u SNOWFLAKE_USER] [-r SNOWFLAKE_ROLE] [-w SNOWFLAKE_WAREHOUSE] [-d SNOWFLAKE_DATABASE] [-c CHANGE_HISTORY_TABLE SCHEMACHANGE.${my_db}.${change_history_table_name}_${environment}] [--vars VARS] [--create-change-history-table] [-ac] [-v] [--dry-run] [--query-tag QUERY_TAG] [--deploy-external] [--snowflake-external-account ${reader_account_locator}] [--snowflake-external-user ${reader_account_user}] [--snowflake-external-role ${reader_account_deploy_role}] [--snowflake-external-warehouse ${reader_account_deploy_warehouse}]
+```
+
 ## Integrating With DevOps
 
 ### Sample DevOps Process Flow
