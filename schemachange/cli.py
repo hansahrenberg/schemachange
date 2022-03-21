@@ -158,6 +158,12 @@ def deploy_command(config):
   print("Using default warehouse %s" % config['snowflake-warehouse'])
   print("Using default database %s" % config['snowflake-database'])
 
+  if config['deploy-external']:
+    print("Deploying to an external Snowflake account")
+    print("Using external Snowflake account %s" % config['snowflake-external-account'])
+    print("Using external role %s" % config['snowflake-external-role'])
+    print("Using external warehouse %s" % config['snowflake-external-warehouse'])
+
   # Set default and optional Snowflake session parameters
   snowflake_session_parameters = {
     "QUERY_TAG": "schemachange %s" % _schemachange_version
@@ -171,6 +177,12 @@ def deploy_command(config):
   os.environ["SNOWFLAKE_ROLE"] = config['snowflake-role']
   os.environ["SNOWFLAKE_WAREHOUSE"] = config['snowflake-warehouse']
   os.environ["SNOWFLAKE_AUTHENTICATOR"] = 'snowflake'
+
+  os.environ["SNOWFLAKE_EXTERNAL_ACCOUNT"] = config['snowflake-external-account'] if config['deploy-external'] else ""
+  os.environ["SNOWFLAKE_EXTERNAL_USER"] = config['snowflake-external-user'] if config['deploy-external'] else ""
+  os.environ["SNOWFLAKE_EXTERNAL_ROLE"] = config['snowflake-external-role'] if config['deploy-external'] else ""
+  os.environ["SNOWFLAKE_EXTERNAL_WAREHOUSE"] = config['snowflake-external-warehouse'] if config['deploy-external'] else ""
+  os.environ["SNOWFLAKE_EXTERNAL_AUTHENTICATOR"] = 'snowflake'
 
   scripts_skipped = 0
   scripts_applied = 0
@@ -248,7 +260,7 @@ def deploy_command(config):
 
     print("Applying change script %s" % script['script_name'])
     if not config['dry-run']:
-      apply_change_script(script, content, config['vars'], config['snowflake-database'], change_history_table, snowflake_session_parameters, config['autocommit'], config['verbose'])
+      apply_change_script(script, content, config['vars'], config['snowflake-database'], change_history_table, snowflake_session_parameters, config['autocommit'], config['verbose'], config['deploy-external'])
 
     scripts_applied += 1
 
@@ -308,7 +320,7 @@ def load_schemachange_config(config_file_path: str) -> Dict[str, Any]:
   return config
 
 
-def get_schemachange_config(config_file_path, root_folder, modules_folder, snowflake_account, snowflake_user, snowflake_role, snowflake_warehouse, snowflake_database, change_history_table_override, vars, create_change_history_table, autocommit, verbose, dry_run, query_tag):
+def get_schemachange_config(config_file_path, root_folder, modules_folder, snowflake_account, snowflake_user, snowflake_role, snowflake_warehouse, snowflake_database, snowflake_external_account, snowflake_external_user, snowflake_external_role, snowflake_external_warehouse, change_history_table_override, vars, create_change_history_table, autocommit, verbose, dry_run, query_tag, deploy_external):
   config = load_schemachange_config(config_file_path)
 
   # First the folder paths
@@ -356,8 +368,28 @@ def get_schemachange_config(config_file_path, root_folder, modules_folder, snowf
   if 'snowflake-database' not in config:
     config['snowflake-database'] = None
 
+  if snowflake_external_account:
+    config['snowflake-external-account'] = snowflake_external_account
+  if 'snowflake-external-account' not in config:
+    config['snowflake-external-account'] = None
+
+  if snowflake_external_user:
+    config['snowflake-external-user'] = snowflake_external_user
+  if 'snowflake-external-user' not in config:
+    config['snowflake-external-user'] = None
+
+  if snowflake_external_role:
+    config['snowflake-external-role'] = snowflake_external_role
+  if 'snowflake-external-role' not in config:
+    config['snowflake-external-role'] = None
+
+  if snowflake_external_warehouse:
+    config['snowflake-external-warehouse'] = snowflake_external_warehouse
+  if 'snowflake-external-warehouse' not in config:
+    config['snowflake-external-warehouse'] = None
+
   if change_history_table_override:
-    config['change-history-table'] = change_history_table_override
+    config['change-history-table'] = change_history_table_override + f"_{config['snowflake-external-account'].split('.')[0]}".upper() if deploy_external else change_history_table_override
   if 'change-history-table' not in config:
     config['change-history-table'] = None
 
@@ -390,6 +422,11 @@ def get_schemachange_config(config_file_path, root_folder, modules_folder, snowf
     config['query-tag'] = query_tag
   if 'query-tag' not in config:
     config['query-tag'] = None
+
+  if deploy_external:
+    config['deploy-external'] = deploy_external
+  if 'deploy-external' not in config:
+    config['deploy-external'] = False
 
   if config['vars']:
     # if vars is configured wrong in the config file it will come through as a string
@@ -466,11 +503,15 @@ def get_all_scripts_recursively(root_directory, verbose):
 
   return all_files
 
-def execute_snowflake_query(snowflake_database, query, snowflake_session_parameters, autocommit, verbose):
+def execute_snowflake_query(snowflake_database, query, snowflake_session_parameters, autocommit, verbose, run_external):
   # Password authentication is the default
   snowflake_password = None
+  snowflake_external_password = None
   if os.getenv("SNOWFLAKE_PASSWORD") is not None and os.getenv("SNOWFLAKE_PASSWORD"):
     snowflake_password = os.getenv("SNOWFLAKE_PASSWORD")
+  if run_external:
+    if os.getenv("SNOWFLAKE_EXTERNAL_PASSWORD") is not None and os.getenv("SNOWFLAKE_EXTERNAL_PASSWORD"):
+      snowflake_external_password = os.getenv("SNOWFLAKE_EXTERNAL_PASSWORD")
   elif os.getenv("SNOWSQL_PWD") is not None and os.getenv("SNOWSQL_PWD"):  # Check legacy/deprecated env variable
     snowflake_password = os.getenv("SNOWSQL_PWD")
     warnings.warn("The SNOWSQL_PWD environment variable is deprecated and will be removed in a later version of schemachange. Please use SNOWFLAKE_PASSWORD instead.", DeprecationWarning)
@@ -480,13 +521,13 @@ def execute_snowflake_query(snowflake_database, query, snowflake_session_paramet
       print("Proceeding with password authentication")
 
     con = snowflake.connector.connect(
-      user = os.environ["SNOWFLAKE_USER"],
-      account = os.environ["SNOWFLAKE_ACCOUNT"],
-      role = os.environ["SNOWFLAKE_ROLE"],
-      warehouse = os.environ["SNOWFLAKE_WAREHOUSE"],
+      user = os.environ["SNOWFLAKE_EXTERNAL_USER"] if run_external else os.environ["SNOWFLAKE_USER"],
+      account = os.environ["SNOWFLAKE_EXTERNAL_ACCOUNT"] if run_external else os.environ["SNOWFLAKE_ACCOUNT"],
+      role = os.environ["SNOWFLAKE_EXTERNAL_ROLE"] if run_external else os.environ["SNOWFLAKE_ROLE"],
+      warehouse = os.environ["SNOWFLAKE_EXTERNAL_WAREHOUSE"] if run_external else os.environ["SNOWFLAKE_WAREHOUSE"],
       database = snowflake_database,
       authenticator = os.environ["SNOWFLAKE_AUTHENTICATOR"],
-      password = snowflake_password,
+      password = snowflake_external_password if run_external else snowflake_password,
       application = _snowflake_application_name,
       session_parameters = snowflake_session_parameters
     )
@@ -634,7 +675,7 @@ def fetch_change_history(change_history_table, snowflake_session_parameters, aut
 
   return change_history
 
-def apply_change_script(script, script_content, vars, default_database, change_history_table, snowflake_session_parameters, autocommit, verbose):
+def apply_change_script(script, script_content, vars, default_database, change_history_table, snowflake_session_parameters, autocommit, verbose, deploy_external):
   # Define a few other change related variables
   checksum = hashlib.sha224(script_content.encode('utf-8')).hexdigest()
   execution_time = 0
@@ -645,7 +686,7 @@ def apply_change_script(script, script_content, vars, default_database, change_h
     start = time.time()
     session_parameters = snowflake_session_parameters.copy()
     session_parameters["QUERY_TAG"] += ";%s" % script['script_name']
-    execute_snowflake_query(default_database, script_content, session_parameters, autocommit, verbose)
+    execute_snowflake_query(default_database, script_content, session_parameters, autocommit, verbose, deploy_external)
     end = time.time()
     execution_time = round(end - start)
 
@@ -704,6 +745,11 @@ def main(argv=sys.argv):
   parser_deploy.add_argument('-v','--verbose', action='store_true', help = 'Display verbose debugging details during execution (the default is False)', required = False)
   parser_deploy.add_argument('--dry-run', action='store_true', help = 'Run schemachange in dry run mode (the default is False)', required = False)
   parser_deploy.add_argument('--query-tag', type = str, help = 'The string to add to the Snowflake QUERY_TAG session value for each query executed', required = False)
+  parser_deploy.add_argument('--deploy-external', action='store_true', help = 'Run deployments to an external account', required = False)
+  parser_deploy.add_argument('--snowflake-external-account', type = str, help = 'The name of the external snowflake account (e.g. xy12345.east-us-2.azure)', required = '--deploy-external' in sys.argv)
+  parser_deploy.add_argument('--snowflake-external-user', type = str, help = 'The name of the snowflake user', required = '--deploy-external' in sys.argv)
+  parser_deploy.add_argument('--snowflake-external-role', type = str, help = 'The name of the default role to use', required = '--deploy-external' in sys.argv)
+  parser_deploy.add_argument('--snowflake-external-warehouse', type = str, help = 'The name of the default warehouse to use. Can be overridden in the change scripts.', required = '--deploy-external' in sys.argv)
 
   parser_render = subcommands.add_parser('render', description="Renders a script to the console, used to check and verify jinja output from scripts.")
   parser_render.add_argument('--config-folder', type = str, default = '.', help = 'The folder to look in for the schemachange-config.yml file (the default is the current working directory)', required = False)
@@ -726,9 +772,9 @@ def main(argv=sys.argv):
   # First get the config values
   config_file_path = os.path.join(args.config_folder, _config_file_name)
   if args.subcommand == 'render':
-    config = get_schemachange_config(config_file_path, args.root_folder, args.modules_folder, None, None, None, None, None, None, args.vars, None, None, args.verbose, None, None)
+    config = get_schemachange_config(config_file_path, args.root_folder, args.modules_folder, None, None, None, None, None, None, None, None, None, None, args.vars, None, None, args.verbose, None, None, None)
   else:
-    config = get_schemachange_config(config_file_path, args.root_folder, args.modules_folder, args.snowflake_account, args.snowflake_user, args.snowflake_role, args.snowflake_warehouse, args.snowflake_database, args.change_history_table, args.vars, args.create_change_history_table, args.autocommit, args.verbose, args.dry_run, args.query_tag)
+    config = get_schemachange_config(config_file_path, args.root_folder, args.modules_folder, args.snowflake_account, args.snowflake_user, args.snowflake_role, args.snowflake_warehouse, args.snowflake_database, args.snowflake_external_account, args.snowflake_external_user, args.snowflake_external_role, args.snowflake_external_warehouse, args.change_history_table, args.vars, args.create_change_history_table, args.autocommit, args.verbose, args.dry_run, args.query_tag, args.deploy_external)
 
   # setup a secret manager and assign to global scope
   sm = SecretManager()

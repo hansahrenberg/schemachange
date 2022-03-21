@@ -392,6 +392,12 @@ To get started with schemachange and these demo Citibike scripts follow these st
 1. Open a shell and change directory to your copy of the schemachange repository
 1. Run schemachange (see [Running the Script](#running-the-script) above) with your Snowflake account details and the `demo/citibike` folder as the root folder (make sure you use the full path)
 
+## Deploying to Read-Only accounts
+
+Deploying resources to read-only accounts is necessary when using with Secure Data Sharing. By default schemachange will try to create and manage migration history table(s) in the same account where the resources live. With reader accounts this scenario is not possible.
+
+In order to deploy resources to reader account(s), schemachange must manage the migration history in the provider account. This is an additional functionality and requires setting external account parameters during deployment. This functionality can be enabled by setting `--deploy-external` switch. Migration history tables are named similarly but with account locator as suffix.
+
 ## Integrating With DevOps
 
 ### Sample DevOps Process Flow
